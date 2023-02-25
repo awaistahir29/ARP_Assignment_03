@@ -21,3 +21,7 @@ If you need any help related to the application simply wirte
 ```bashscript
 $ ./help.sh
 ```
+
+## Authors and Contacts
+- Awais Tahir
+- email: S5174335@studenti.unige.it
