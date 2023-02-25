@@ -1,0 +1,15 @@
+***log file created***
+***log file created***
+***log file created***
+p - ProcessA Log File
+
+ERROR (src/processA.c:73) -- Permission denied
+***log file created***
+p - ProcessA Log File
+
+ERROR (src/processA.c:73) -- Permission denied
+***log file created***
+***log file created***
+p - ProcessA Log File
+
+ERROR (src/processA.c:73) -- Permission denied

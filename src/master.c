@@ -9,6 +9,8 @@
 #include <sys/mman.h>
 #include <fcntl.h> 
 #include <sys/shm.h> 
+#include <errno.h>
+#include <string.h>
  
 #define shm_name "/AOS"
 #define sem_1 "/sem_AV_1" 
@@ -57,6 +59,19 @@ int spawn(const char * program, char * arg_list[]) {
 }
 
 int main() {
+
+  //open Log file
+  logfile = fopen("Master.txt", "a");
+  if (logfile == NULL)
+  {
+    printf("an error occured while creating Master's log File\n");
+     return 0;
+  }
+    fprintf(logfile, "***log file created***\n");
+    fflush(logfile);
+
+    //Writing in log file
+    fprintf(logfile, "p - Master Log File\n");
 
   char buffer_A[512];
   int DIM_BUFFER = 512;

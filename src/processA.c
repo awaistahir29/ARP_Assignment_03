@@ -19,11 +19,15 @@
 #include <netdb.h> 
 #include <strings.h>
 #include <signal.h>
+#include <errno.h>
+#include <string.h>
 
 #define sem_1 "/sem_AV_1" //Sem_procuder
 #define sem_2 "/sem_AV_2" //Sem_consumer
 #define shm_name "/AOS"
 
+//pointer to log file
+FILE *logfile;
 
 /*Parameters*/
 const int SM_WIDTH = 1600;
@@ -61,6 +65,20 @@ int mode;
 char address[256] = "";
 
 struct sigaction ignore_action;
+
+int check(int retval)
+{
+    if (retval == -1)
+    {
+        fprintf(logfile, "\nERROR (" __FILE__ ":%d) -- %s\n", __LINE__, strerror(errno));
+        fflush(logfile);
+        fclose(logfile);
+        printf("\tAn error has been reported on log file.\n");
+        fflush(stdout);
+        exit(-1);
+    }
+    return retval;
+}
 
 /* Save the current bitmap object to 
 out directory starting from 0 */
@@ -147,6 +165,19 @@ void reset_bmp(bmpfile_t * bmp) {
 int main(int argc, char *argv[])
 {
 
+    //open Log file
+    logfile = fopen("ProcessA.txt", "a");
+    if (logfile == NULL)
+    {
+        printf("an error occured while creating ProcessA's log File\n");
+        return 0;
+    }
+        fprintf(logfile, "***log file created***\n");
+        fflush(logfile);
+
+        //Writing in log file
+        fprintf(logfile, "p - ProcessA Log File\n");
+
     printf("Select Execution Mode: \n\n\n PRESS 1: Normal Mode \n\n PRESS 2: Server Mode \n\n PRESS 3: Client Mode\n\n");
     scanf("%d", &mode);  
 
@@ -162,10 +193,7 @@ int main(int argc, char *argv[])
             struct sockaddr_in cli_addr;
             int portno, clilen;
 
-            sockfd = socket(AF_INET, SOCK_STREAM, 0);
-            if(sockfd < 0) {
-                perror("ERROR in opening the socket");
-            } 
+            sockfd = check(socket(AF_INET, SOCK_STREAM, 0));
 
             bzero((char *) &serv_addr, sizeof(serv_addr));
 
@@ -176,7 +204,7 @@ int main(int argc, char *argv[])
             serv_addr.sin_addr.s_addr = INADDR_ANY;
             serv_addr.sin_port = htons(portno);
 
-            if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+            if (check(bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr))) < 0) {
                 perror("ERROR in binding");
             }else{
                 printf("\nReady...");
@@ -185,7 +213,7 @@ int main(int argc, char *argv[])
             listen(sockfd,5);            
             clilen = sizeof(cli_addr);
 
-            newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+            newsockfd = check(accept(sockfd, (struct sockaddr *) &cli_addr, &clilen));
             if (newsockfd < 0) {
                 perror("ERROR to accept");
             }
@@ -206,7 +234,7 @@ int main(int argc, char *argv[])
                 printf("\n Enter the port: ");
                 scanf("%d", &portno); 
 
-                sockfd = socket(AF_INET, SOCK_STREAM, 0);
+                sockfd = check(socket(AF_INET, SOCK_STREAM, 0));
                 if (sockfd < 0) {
                     perror("ERROR opening socket");
                 }
@@ -226,8 +254,7 @@ int main(int argc, char *argv[])
 
                 serv_addr.sin_port = htons(portno);
 
-                r = connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr));
-
+                r = check(connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr)));
                 if(r != 0){
                     printf("Error during connection...\n");
                 }                   
@@ -349,7 +376,7 @@ int main(int argc, char *argv[])
                     char str_cmd[5];
                     snprintf(str_cmd, 5, "%d", cmd);
 
-                    int n = write(sockfd, str_cmd, 5);
+                    int n = check(write(sockfd, str_cmd, 5));
                     if (n == -1) {
                         perror("Socket write error");
                         close(sockfd);

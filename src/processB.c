@@ -20,11 +20,16 @@
 #include <strings.h>
 #include <signal.h>
 #include <arpa/inet.h>
+#include <errno.h>
+#include <string.h>
 
 #define radius 30
 #define sem_1 "/sem_AV_1" 
 #define sem_2 "/sem_AV_2" 
 #define shm_name "/AOS"
+
+//pointer to log file
+FILE *logfile;
 
 /*Parameters*/
 const int SM_WIDTH = 1600;
@@ -49,22 +54,49 @@ sem_t * sem_id2;
 /*Variable to store the execution mode (normal, server or client)*/
 int mode;
 
+int check(int retval)
+{
+    if (retval == -1)
+    {
+        fprintf(logfile, "\nERROR (" __FILE__ ":%d) -- %s\n", __LINE__, strerror(errno));
+        fflush(logfile);
+        fclose(logfile);
+        printf("\tAn error has been reported on log file.\n");
+        fflush(stdout);
+        exit(-1);
+    }
+    return retval;
+}
+
 int main(int argc, char const *argv[])
 {
+    //open Log file
+    logfile = fopen("ProcessB.txt", "a");
+    if (logfile == NULL)
+    {
+        printf("an error occured while creating ProcessB's log File\n");
+        return 0;
+    }
+        fprintf(logfile, "***log file created***\n");
+        fflush(logfile);
+
+        //Writing in log file
+        fprintf(logfile, "p - ProcessB Log File\n");
+
     if(mode == 2 || mode == 3) {
         char address[256];
         int port;
-        printf("Enter the address of the companion application: ");
+        printf("\n Enter the Address: ");
         scanf("%s", address);
-        printf("Enter the port of the companion application: ");
+        printf("\n Enter the Port: ");
         scanf("%d", &port);
         // create a socket and connect to the companion application
-        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        int sockfd = check(socket(AF_INET, SOCK_STREAM, 0));
         struct sockaddr_in serv_addr;
         serv_addr.sin_family = AF_INET;
         serv_addr.sin_port = htons(port);
         inet_pton(AF_INET, address, &serv_addr.sin_addr);
-        int status = connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+        int status = check(connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)));
         if (status == -1) {
         // handle error
     }
@@ -81,7 +113,7 @@ int main(int argc, char const *argv[])
     sem_id2 = sem_open(sem_2, 0);
 
     // create the shared memory object
-    shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+    shm_fd = check(shm_open(shm_name, O_CREAT | O_RDWR, 0666));
 
     /* configure the size of the shared memory object */
     ftruncate(shm_fd, SHM_SIZE);
@@ -123,8 +155,8 @@ int main(int argc, char const *argv[])
         int x = sum_x/count;
         int y = sum_y/count;
 
-        float scale_x = SM_WIDTH/COLS;
-        float scale_y = SM_HEIGHT/LINES;      
+        float scale_x = (float)SM_WIDTH/(float)COLS;
+        float scale_y = (float)SM_HEIGHT/(float)LINES;      
         
         mvaddch(y/scale_y, x/scale_x, '0');
         refresh();        
