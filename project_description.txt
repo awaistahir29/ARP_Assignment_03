@@ -1,3 +1,8 @@
+Quick Start
+
+1 - Install the application using by using shell script "./install.sh" on the terminal
+2 - Run the application by simply typing "./run.sh" on the terminal
+
 In the modified application, process B, shared memory and the second ncurses window are
 unchanged. Process A includes two new features:
 
