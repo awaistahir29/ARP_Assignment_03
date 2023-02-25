@@ -1,0 +1,25 @@
+In the modified application, process B, shared memory and the second ncurses window are
+unchanged. Process A includes two new features:
+
+1. Client connection toward a similar application running on a different machine in the network
+2. Server connection for a similar application running on a different machine in the network
+
+Therefore the application, when launched, asks for one execution modality:
+
+1. Normal, as assignment 2
+
+2. Server: The application does not use the keyboard for input: it receives input from another
+application (on a different machine) running in client mode.
+
+3. Client: the application runs normally as assignment 2 and sends its keyboard input to another
+application (on a different machine) running in server mode.
+
+When selecting modes 2 and 3 the application asks address and port of the companion
+application.
+
+Protocol
+To assure that any application is able to properly connect to any other application (implemented by
+some other student/group), a communication protocol must be defined.
+IP protocol: TCP
+data: a byte stream of char, one per key pressed.
+(flush data if necessary).
