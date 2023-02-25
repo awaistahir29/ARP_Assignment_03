@@ -10,232 +10,267 @@
 #include <semaphore.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/mman.h>
+#include <fcntl.h> 
+#include <sys/shm.h> 
+#include <string.h> 
+#include <netinet/in.h>
+#include <netdb.h> 
+#include <strings.h>
+#include <signal.h>
 
-#define NAME "out/NEW"
-/*
-Simply moving the circle in ncurces window which moves the 20x bigger circle in the 
-shared memory.
-Keep updating the circle in bitmap when movements occur in ncurces window of the processA
-*/
-int width = 1600;
-int height = 600;
-int depth = 4;
-int init_width;
-int init_height;
-int new_width;
-int new_height;
-int shift = 20;
-int radius;
+#define sem_1 "/sem_AV_1" //Sem_procuder
+#define sem_2 "/sem_AV_2" //Sem_consumer
+#define shm_name "/AOS"
+
+
+/*Parameters*/
+const int SM_WIDTH = 1600;
+const int SM_HEIGHT = 600;
+const int DEPTH = 4;
+const int RADIUS = 30;
+int n_curses_width = 90;
+int n_curses_height = 30;
+const int COLOR_SEG = SM_WIDTH*SM_HEIGHT;
+const int SM_FACTOR = 20;
+const int BMP_CIRC_RADIUS = 60;
+const int SHM_SIZE = SM_WIDTH*SM_HEIGHT*4;
 
 // Data structure for storing the bitmap file
 bmpfile_t *bmp;
 // Data type for defining pixel colors (BGRA)
 rgb_pixel_t pixel = {0, 0, 255, 0};
-rgb_pixel_t pixel1 = {255, 255, 255, 255};
+rgb_pixel_t empty_pixel = {255, 255, 255, 0}; //White pixel
 
-// Function to Remove the previous circle
-void rmv_prevCircle(){
-    for(int x = -radius; x <= radius; x++) {
-                        for(int y = -radius; y <= radius; y++) {
-                            // If distance is smaller, point is within the circle
-                            if(sqrt(((x-10)*x) + (y*y) < radius)) {
-                                bmp_set_pixel(bmp, new_width + x, new_height + y, pixel1);
-                            }
-                        }
-                    }
+/*Shared memory*/
+int shm_fd; 
+rgb_pixel_t * ptr;
+
+/*Print counter*/
+int print_counter = 0;
+
+/*Semaphores*/ 
+sem_t * sem_id1;
+sem_t * sem_id2;
+
+/*Socket descriptor for client or server mode*/
+int sockfd;
+int newsockfd;
+int mode;
+char address[256] = "";
+
+struct sigaction ignore_action;
+
+/* Save the current bitmap object to 
+out directory starting from 0 */
+bool take_snapshot(){
+    char path[20];
+
+    snprintf(path, 20, "out/%d.bmp", print_counter);
+    print_counter += 1;
+
+    bmp_save(bmp, path);   
 }
 
-// Function to Draw New Circle
-void draw_newCircle(){
-    for(int x = -radius; x <= radius; x++) {
-                        for(int y = -radius; y <= radius; y++) {
-                            // If distance is smaller, point is within the circle
-                            if(sqrt(((x-10)*x) + (y*y) < radius)) {
-                                bmp_set_pixel(bmp, new_width + x, new_height + y, pixel);
-                            }
-                        }
-                    }
-}
-
-#define radius 30
-
-// Typedef for circle center
-typedef struct {
-    int x,y;
-}coordinate;
-
- /* Instantiate bitmap, passing three parameters:
-    *   - width of the image (in pixels)
-    *   - Height of the image (in pixels)
-    *   - Depth of the image (1 for greyscale images, 4 for colored images)
-*/
-// Data type for defining pixel colors (BGRA)
-rgb_pixel_t pixel_w = {255, 255, 255, 0};
-
-// draw a circle in the center (cx,cy) for a bitmap
-void circle_draw(int cx, int cy, bmpfile_t *bmp){
-  for(int x = -radius; x <= radius; x++) {
-    for(int y = -radius; y <= radius; y++) {
-      // If distance is smaller, point is within the circle
-      if(sqrt(x*x + y*y) < radius) {
-          /*
-          * Color the pixel at the specified (x,y) position
-          * with the given pixel values
-          */
-          bmp_set_pixel(bmp, cx + x, cy + y, pixel);
-      }
-    }
-  }
-}
-
-// draw a circle for the shared memory
-void circle_drawAOS(bmpfile_t *bmp, rgb_pixel_t *ptr){
-
-    rgb_pixel_t* p;
-    
-    for(int i = 0; i < height; i++){
-      for(int j = 0; j < width; j++){
-
-        p = bmp_get_pixel(bmp,j,i);
-
-        
-        ptr[i+j*height].alpha = p->alpha;
-        ptr[i+j*height].blue = p->blue;
-        ptr[i+j*height].green = p->green;
-        ptr[i+j*height].red = p->red;
-
-      }
-    }
-
-}
-
-
-// delete the old circle by colouring everything white for the bitmap
-void delete(int cx, int cy, bmpfile_t *bmp){
-  for(int x = -radius; x <= radius; x++) {
-    for(int y = -radius; y <= radius; y++) {
-      // If distance is smaller, point is within the circle
-      if(sqrt(x*x + y*y) < radius) {
-          /*
-          * Color the pixel at the specified (x,y) position
-          * with the given pixel values
-          */
-          bmp_set_pixel(bmp, cx + x, cy + y, pixel_w);
-      }
-    }
-  }
-}
-
-// delete the old circle by colouring everything white in the shared memory
-void deleteAOS(rgb_pixel_t *ptr){
-    
-    for(int i = 0; i < height; i++){
-      for(int j = 0; j < width; j++){
-        ptr[i+j*height].alpha = pixel_w.alpha;
-        ptr[i+j*height].blue = pixel_w.blue;
-        ptr[i+j*height].green = pixel_w.green;
-        ptr[i+j*height].red = pixel_w.red;
-      }
-    }
-}
-
-// function to find the center of the shared memory
-coordinate find_center(bmpfile_t *bmp, rgb_pixel_t *ptr){
-  
-        int first = 0, last = 0;
-
-        char msg[100];
-
-        coordinate center;
-
-        sprintf(msg," AHAHAHAH loooosers");
-
-         for(int i = 0; i < height; i++){
-          for(int j = 0; j < width; j++){
-             if(ptr[i+j*height].blue == pixel.blue && first == 0){
-              first = j;
-             }
-             if(ptr[i+j*height].blue != pixel.blue && first != 0){
-              last = j-1;
-              break;
-             }
-      }
-
-      if(last - first == 2*radius){
-                center.x = (last-first)/2; // cx
-                center.y = i; // cy
-
-                sprintf(msg," AHAHAHAH first %d last %d", first, last);
-                sprintf(msg," AHAHAHAH cx %d cy %d", center.x,center.y);
-                //file_logG("./logs/prova.txt", msg);
-
-                break;
+/*Draw a colored circle getting the bitmap object and
+the center of the circle*/
+void draw__colored_circle_bmp(bmpfile_t * bmp, int xc, int yc){   
+  for(int x = -RADIUS; x <= RADIUS; x++) {
+        for(int y = -RADIUS; y <= RADIUS; y++) {
+        // If distance is smaller, point is within the circle
+            if(sqrt(x*x + y*y) < RADIUS) {
+                /*
+                * Color the pixel at the specified (x,y) position
+                * with the given pixel values
+                */
+                bmp_set_pixel(bmp, xc + x, yc + y, pixel);
             }
-      first = 0;
-      last = 0;
+        }
     }
-    circle_draw(center.x,center.y,bmp);
+}
 
-    return center;
+/*Draw a white circle getting the bitmap object and
+the center of the circle*/
+void draw__empty_circle_bmp(bmpfile_t * bmp, int xc, int yc){
+    for(int x = -RADIUS; x <= RADIUS; x++) {
+        for(int y = -RADIUS; y <= RADIUS; y++) {
+        // If distance is smaller, point is within the circle
+            if(sqrt(x*x + y*y) < RADIUS) {
+                /*
+                * Color the pixel at the specified (x,y) position
+                * with the given pixel values
+                */
+                bmp_set_pixel(bmp, xc + x, yc + y, empty_pixel);
+            }
+        }
+    }
+}
 
+void load_bmp_to_shm(bmpfile_t * bmp, rgb_pixel_t * ptr){
+    int pos = 0;   
+
+    /*Sem wait*/
+    sem_wait(sem_id1);
+
+    /*Loading pixel*/
+    for(int i = 0; i < SM_WIDTH; i++){
+        for(int j = 0; j < SM_HEIGHT; j++){
+            pos = (i*SM_WIDTH)+j+1; 
+            ptr++;             
+            /*BGRA*/
+            rgb_pixel_t * tmp_p = bmp_get_pixel(bmp,i,j);
+            int b = tmp_p->blue;
+            int g = tmp_p->green;
+            int r = tmp_p->red;
+            int a = tmp_p->alpha;
+            rgb_pixel_t alfio = {b,g,r,a};          
+            *ptr = alfio;                
+        }
+    }
+
+    /*sem signal*/
+    sem_post(sem_id2);    
+}
+
+/*Reset function to clear all bitmap obj
+after a resize of the window*/
+void reset_bmp(bmpfile_t * bmp) {
+    for(int i = 0; i < SM_WIDTH; i++){
+        for(int j = 0; j < SM_HEIGHT; j++){
+            bmp_set_pixel(bmp, i, j, empty_pixel);
+        }
+    }
 }
 
 // Main Functions
 int main(int argc, char *argv[])
 {
-    // instantiation of the shared memory
-    const char * shm_name = "/AOS";
-    const int SIZE = width*height*sizeof(rgb_pixel_t);
-    int shm_fd;
-    rgb_pixel_t* ptr;
-    shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
-    if (shm_fd == 1) {
-        printf("Shared memory segment failed\n");
-        exit(1);
+
+    printf("Select Execution Mode: \n\n\n PRESS 1: Normal Mode \n\n PRESS 2: Server Mode \n\n PRESS 3: Client Mode\n\n");
+    scanf("%d", &mode);  
+
+    switch (mode) {
+        case 1:{
+            /*Normal mode*/
+            
+        } break;
+        case 2:{
+            /*Server Mode*/
+
+            struct sockaddr_in serv_addr;
+            struct sockaddr_in cli_addr;
+            int portno, clilen;
+
+            sockfd = socket(AF_INET, SOCK_STREAM, 0);
+            if(sockfd < 0) {
+                perror("ERROR in opening the socket");
+            } 
+
+            bzero((char *) &serv_addr, sizeof(serv_addr));
+
+            printf("\n Enter the port number: ");
+            scanf("%d", &portno);                       
+
+            serv_addr.sin_family = AF_INET;
+            serv_addr.sin_addr.s_addr = INADDR_ANY;
+            serv_addr.sin_port = htons(portno);
+
+            if (bind(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) {
+                perror("ERROR in binding");
+            }else{
+                printf("\nReady...");
+            }   
+
+            listen(sockfd,5);            
+            clilen = sizeof(cli_addr);
+
+            newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &clilen);
+            if (newsockfd < 0) {
+                perror("ERROR to accept");
+            }
+
+        } break;
+        case 3:{
+            /*client case*/
+            int r = -1;
+
+            int portno, clilen;
+            struct sockaddr_in serv_addr;
+            struct hostent *server;
+
+            char buffer[256];int n;
+            do{
+                printf("\n Enter the address: ");
+                scanf("%s", address);
+                printf("\n Enter the port: ");
+                scanf("%d", &portno); 
+
+                sockfd = socket(AF_INET, SOCK_STREAM, 0);
+                if (sockfd < 0) {
+                    perror("ERROR opening socket");
+                }
+
+                server = gethostbyname(address);
+                if (server == NULL) {
+                    fprintf(stderr,"ERROR, no such host\n");
+                    exit(0);
+                }  
+
+                bzero((char *) &serv_addr, sizeof(serv_addr));
+                serv_addr.sin_family = AF_INET;
+
+                bcopy((char *)server->h_addr, 
+                (char *)&serv_addr.sin_addr.s_addr,
+                server->h_length);
+
+                serv_addr.sin_port = htons(portno);
+
+                r = connect(sockfd,(struct sockaddr *)&serv_addr,sizeof(serv_addr));
+
+                if(r != 0){
+                    printf("Error during connection...\n");
+                }                   
+            
+            }while(r != 0);
+
+            /* Ignore the SIGINT signal throw when client try to 
+            write to a closed socket */
+            memset(&ignore_action, 0, sizeof(ignore_action));
+            ignore_action.sa_handler = SIG_IGN;
+            sigaction(SIGUSR1, &ignore_action, NULL);
+        }
     }
 
-    ftruncate(shm_fd,SIZE);
-
-    ptr = (rgb_pixel_t *)mmap(0, SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);
-    if (ptr == MAP_FAILED) {
-        printf("Map failed\n");
-        return 1;
-    }
-
+    // Normal execution, use keyboard input
     // Utility variable to avoid trigger resize event on launch
     int first_resize = TRUE;
 
-    // Initialize UI
-    init_console_ui();
-
-    
-   // variable to name the copies of the bitmap saved from time to time
-    int val = 0;
-
-    // variable to store the old center of the circle (delete function)
-    int cx = width/2, cy = height/2;
-
-    // variable to name the bitmap file to be saved
-    char msg[100];
+    //Open semaphores
+    sem_id1 = sem_open(sem_1, 0);
+    sem_id2 = sem_open(sem_2, 0);
 
     // Initialize UI
     init_console_ui();
 
-    // Data structure for storing the bitmap file
-    bmpfile_t *bmp;
-    
-    bmp = bmp_create(width, height, depth);
+    // Instantiate bitmap
+    bmp = bmp_create(SM_WIDTH, SM_HEIGHT, DEPTH);
 
-    circle_draw(cx,cy,bmp);
-    bmp_save(bmp, NAME);
-    circle_drawAOS(bmp, ptr); 
-    
+    // create the shared memory object
+    shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+
+    /* configure the size of the shared memory object */
+    ftruncate(shm_fd, SHM_SIZE);
+
+    /* memory map the shared memory object */
+    ptr = mmap(0, SHM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+
     // Infinite loop
-    while (TRUE)
-    {
+    while (TRUE) {
         // Get input in non-blocking mode
         int cmd = getch();
+        float scale_x = (float)SM_WIDTH/(float)(COLS-BTN_SIZE_X);
+        float scale_y = (float)SM_HEIGHT/LINES;
 
         // If user resizes screen, re-draw UI...
         if(cmd == KEY_RESIZE) {
@@ -244,6 +279,11 @@ int main(int argc, char *argv[])
             }
             else {
                 reset_console_ui();
+                reset_bmp(bmp);
+                float scale_x = (float)SM_WIDTH/(float)(COLS-BTN_SIZE_X);
+                float scale_y = (float)SM_HEIGHT/(float)LINES;
+                draw__colored_circle_bmp(bmp, floor(circle.x*scale_x), floor(circle.y*scale_y));
+                load_bmp_to_shm(bmp, ptr);
             }
         }
 
@@ -252,8 +292,10 @@ int main(int argc, char *argv[])
             if(getmouse(&event) == OK) {
                 if(check_button_pressed(print_btn, &event)) {
                     mvprintw(LINES - 1, 1, "Print button pressed");
-                    // Save image as .bmp file
-                    bmp_save(bmp, NAME);
+
+                    /*Call print to file function*/
+                    take_snapshot();
+
                     refresh();
                     sleep(1);
                     for(int j = 0; j < COLS - BTN_SIZE_X - 2; j++) {
@@ -262,21 +304,70 @@ int main(int argc, char *argv[])
                 }
             }
         }
-        
-        // If input is an arrow key, move circle accordingly...
-        else if(cmd == KEY_LEFT || cmd == KEY_RIGHT || cmd == KEY_UP || cmd == KEY_DOWN) {
-            move_circle(cmd);
-            draw_circle();
-            delete(cx,cy,bmp);
-            deleteAOS(ptr);
-            cx = circle.x*20;
-            cy = circle.y*20;
-            circle_draw(cx,cy,bmp);
-            circle_drawAOS(bmp,ptr);
-        }
-        
-    }
 
+        if(mode == 2){
+            /*Server mode*/
+            char input_string[5];
+
+            int n = read(newsockfd,input_string,5);
+
+            if(n < 3){                
+                /*Error / Socket closed from the other side*/
+                close(newsockfd); //Close the socket from the server side                              
+            }else{                
+                /*Select case*/
+                int com = atoi(input_string);
+
+                if(com == KEY_LEFT || com == KEY_RIGHT || com == KEY_UP || com == KEY_DOWN){
+                    draw__empty_circle_bmp(bmp, floor(circle.x*scale_x), floor(circle.y*scale_y));
+                    move_circle(com);
+                    draw__colored_circle_bmp(bmp, floor(circle.x*scale_x), floor(circle.y*scale_y));
+                    draw_circle();
+                    /*Sync with Shared memory image*/
+                    load_bmp_to_shm(bmp, ptr);
+                }               
+               
+            }
+            
+        }
+
+        // If input is an arrow key, move circle accordingly...
+        else if(cmd == KEY_LEFT || cmd == KEY_RIGHT || cmd == KEY_UP || cmd == KEY_DOWN) {            
+
+            switch (mode) {
+                case 1: {
+                    // Mode 1
+                    draw__empty_circle_bmp(bmp, floor(circle.x * scale_x), floor(circle.y * scale_y));
+                    move_circle(cmd);
+                    draw__colored_circle_bmp(bmp, floor(circle.x * scale_x), floor(circle.y * scale_y));
+                    draw_circle();
+                    load_bmp_to_shm(bmp, ptr);
+                    break;
+                }
+                case 3: {
+                    // Client mode 
+                    char str_cmd[5];
+                    snprintf(str_cmd, 5, "%d", cmd);
+
+                    int n = write(sockfd, str_cmd, 5);
+                    if (n == -1) {
+                        perror("Socket write error");
+                        close(sockfd);
+                    } else if (n != 5) {
+                        fprintf(stderr, "Unexpected number of bytes written: %d\n", n);
+                    } else {
+                        draw__empty_circle_bmp(bmp, floor(circle.x * scale_x), floor(circle.y * scale_y));
+                        move_circle(cmd);
+                        draw__colored_circle_bmp(bmp, floor(circle.x * scale_x), floor(circle.y * scale_y));
+                        draw_circle();
+                        load_bmp_to_shm(bmp, ptr);
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    
     endwin();
     return 0;
 }

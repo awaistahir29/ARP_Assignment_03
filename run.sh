@@ -1,4 +1,4 @@
-gcc src/master.c -lncurses -lbmp -lm -o bin/master
-gcc src/processA.c -lncurses -lbmp -lm -lrt -o bin/processA
-gcc src/processB.c -lncurses -lbmp -lm -lrt -o bin/processB
+gcc src/master.c -pthread -lncurses -lbmp -lm -lrt -o bin/master
+gcc src/processA.c -pthread -lncurses -lbmp -lm -lrt -o bin/processA
+gcc src/processB.c -pthread -lncurses -lbmp -lm -lrt -o bin/processB
 ./bin/master

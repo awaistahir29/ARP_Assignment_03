@@ -1,6 +1,5 @@
 #include "./../include/processB_utilities.h"
 
-
 #include <stdio.h>
 #include <bmpfile.h>
 #include <stdlib.h>
@@ -11,201 +10,127 @@
 #include <semaphore.h>
 #include <sys/fcntl.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <sys/mman.h>
-#define NAME "out/NEW"
+#include <fcntl.h> 
+#include <sys/shm.h> 
+#include <string.h> 
+#include <netinet/in.h>
+#include <netdb.h> 
+#include <strings.h>
+#include <signal.h>
+#include <arpa/inet.h>
+
 #define radius 30
-/*
-Simply accessing the shared memory (BitMap) and performing some feature extraction to display trajectory.
-Step 0:
-    Reduce teh pixels again with the factor of 20x so that we get normal circled value that we gave
-    in the process A.
+#define sem_1 "/sem_AV_1" 
+#define sem_2 "/sem_AV_2" 
+#define shm_name "/AOS"
 
-Step 1:
-    We will get the pixels from the shared memory which is the bitmap by scanning the pixels
-    using the function (bmp_get_pixel()) more details in header file of the bitmap
-    /usr/local/include -> file containing the functions
-    Which return the pixels that we had set in the process A 
+/*Parameters*/
+const int SM_WIDTH = 1600;
+const int SM_HEIGHT = 600;
+const int DEPTH = 4;
+const int RADIUS = 30;
+int n_curses_width = 80;
+int n_curses_height = 30;
+const int COLOR_SEG = SM_WIDTH*SM_HEIGHT;
+const int SM_FACTOR = 20;
+const int BMP_CIRC_RADIUS = 60;
+const int SHM_SIZE = SM_WIDTH*SM_HEIGHT*4;
 
-Step 2:
-    Scan whole pixels and do some feature extraction like Comparing each line passing from the circle
-    to compute the length of the line and if length is equal to the diameter of the circle then the
-    centered point of the circle is the mid point of the circle
+/*Shared memory*/
+int shm_fd; 
+rgb_pixel_t * ptr;
 
-Step 3:
-Taking that mid point we draw the trajectory:
-    BY storing all the mid points to an array and display these centre points(Pixels) along with the realtime
-    coming centered pixels in to the screen
-*/
+/*Semaphore*/
+sem_t * sem_id1;
+sem_t * sem_id2;
 
-// Typedef for circle center
-typedef struct {
-    int x,y;
-}coordinate;
+/*Variable to store the execution mode (normal, server or client)*/
+int mode;
 
- /* Instantiate bitmap, passing three parameters:
-    *   - width of the image (in pixels)
-    *   - Height of the image (in pixels)
-    *   - Depth of the image (1 for greyscale images, 4 for colored images)
-*/
-int width = 1600;
-int height = 600;
-int depth = 4;
-
-// Data type for defining pixel colors (BGRA)
-rgb_pixel_t pixel = {0, 0, 255, 0};
-rgb_pixel_t pixel_w = {255, 255, 255, 0};
-
-// draw a circle in the center (cx,cy) for a bitmap
-void circle_draw(int cx, int cy, bmpfile_t *bmp){
-  for(int x = -radius; x <= radius; x++) {
-    for(int y = -radius; y <= radius; y++) {
-      // If distance is smaller, point is within the circle
-      if(sqrt(x*x + y*y) < radius) {
-          /*
-          * Color the pixel at the specified (x,y) position
-          * with the given pixel values
-          */
-          bmp_set_pixel(bmp, cx + x, cy + y, pixel);
-      }
-    }
-  }
-}
-
-// draw a circle for the shared memory
-void circle_drawAOS(bmpfile_t *bmp, rgb_pixel_t *ptr){
-
-    rgb_pixel_t* p;
-    
-    for(int i = 0; i < height; i++){
-      for(int j = 0; j < width; j++){
-
-        p = bmp_get_pixel(bmp,j,i);
-
-        
-        ptr[i+j*height].alpha = p->alpha;
-        ptr[i+j*height].blue = p->blue;
-        ptr[i+j*height].green = p->green;
-        ptr[i+j*height].red = p->red;
-
-      }
-    }
-
-}
-
-
-// delete the old circle by colouring everything white for the bitmap
-void delete(int cx, int cy, bmpfile_t *bmp){
-  for(int x = -radius; x <= radius; x++) {
-    for(int y = -radius; y <= radius; y++) {
-      // If distance is smaller, point is within the circle
-      if(sqrt(x*x + y*y) < radius) {
-          /*
-          * Color the pixel at the specified (x,y) position
-          * with the given pixel values
-          */
-          bmp_set_pixel(bmp, cx + x, cy + y, pixel_w);
-      }
-    }
-  }
-}
-
-// delete the old circle by colouring everything white in the shared memory
-void deleteAOS(rgb_pixel_t *ptr){
-    
-    for(int i = 0; i < height; i++){
-      for(int j = 0; j < width; j++){
-        ptr[i+j*height].alpha = pixel_w.alpha;
-        ptr[i+j*height].blue = pixel_w.blue;
-        ptr[i+j*height].green = pixel_w.green;
-        ptr[i+j*height].red = pixel_w.red;
-      }
-    }
-}
-
-// function to find the center of the shared memory
-coordinate find_center(bmpfile_t *bmp, rgb_pixel_t *ptr){
-  
-        int first = 0, last = 0;
-
-        char msg[100];
-
-        coordinate center;
-
-         for(int i = 0; i < height; i++){
-          for(int j = 0; j < width; j++){
-             if(ptr[i+j*height].red == pixel.red && ptr[i+j*height].blue != pixel.blue && ptr[i+j*height].green != pixel.green && first == 0){
-              first = j;
-             }
-             if(ptr[i+j*height].red != pixel.red && first != 0){
-              last = j-1;
-              break;
-             }
-            }
-
-            if(last - first == 2*radius){
-                        center.x = (last-first)/2; // cx
-                        center.y = i; // cy
-                        break;
-                    }
-            first = 0;
-            last = 0;
-    }
-
-
-    circle_draw(center.x,center.y,bmp);
-
-    return center;
-}
 int main(int argc, char const *argv[])
 {
-    // instantiation of the shared memory
-    const char * shm_name = "/AOS";
-    const int SIZE = width*height*sizeof(rgb_pixel_t);
-    int shm_fd;
-    rgb_pixel_t * ptr;
-    shm_fd = shm_open(shm_name, O_RDONLY, 0666);
-    if (shm_fd == 1) {
-        printf("Shared memory segment failed\n");
-        exit(1);
+    if(mode == 2 || mode == 3) {
+        char address[256];
+        int port;
+        printf("Enter the address of the companion application: ");
+        scanf("%s", address);
+        printf("Enter the port of the companion application: ");
+        scanf("%d", &port);
+        // create a socket and connect to the companion application
+        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in serv_addr;
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_port = htons(port);
+        inet_pton(AF_INET, address, &serv_addr.sin_addr);
+        int status = connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr));
+        if (status == -1) {
+        // handle error
+    }
     }
 
-    ptr = (rgb_pixel_t *)mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
-    if (ptr == MAP_FAILED) {
-        printf("Map failed\n");
-        return 1;
-    }
-
-    // array for the center
-    coordinate *center = NULL;
-
-    center = (coordinate*) malloc(10 * sizeof (coordinate));
-
-    center[0].x = width/2;
-    center[0].y = height/2;
-
-    
-
-    // normalized center for the ncurse window
-    int cx, cy;
-
-    
     // Utility variable to avoid trigger resize event on launch
     int first_resize = TRUE;
 
     // Initialize UI
     init_console_ui();
 
-    // Data structure for storing the bitmap file
-    bmpfile_t *bmp;
-    
-    bmp = bmp_create(width, height, depth);
+    //Open semaphore
+    sem_id1 = sem_open(sem_1, 0);
+    sem_id2 = sem_open(sem_2, 0);
 
-    circle_draw(800, 300, bmp);
+    // create the shared memory object
+    shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
 
-    bmp_save(bmp, "out/SNOP.bmp");
+    /* configure the size of the shared memory object */
+    ftruncate(shm_fd, SHM_SIZE);
+
+    /* memory map the shared memory object */
+    ptr = mmap(0, SHM_SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
 
     // Infinite loop
-    while (TRUE) {
+    while (TRUE) {       
+
+        /*Wait to enter in the critic section*/
+        sem_wait(sem_id2);
+
+        /*Create a temporal pointer*/
+        rgb_pixel_t * tmp_ptr = ptr+1;
+
+        int count = 1;
+        int sum_x = 0;
+        int sum_y = 0;
+
+        for(int i = 0; i < SM_WIDTH; i++){            
+            for(int j = 0; j < SM_HEIGHT; j++){   
+                
+                rgb_pixel_t * p = tmp_ptr++;
+                int r = p->red;
+                int g = p->green;
+                int b = p->blue;
+                int a = p->alpha;
+
+                /*Searching colored pixel*/   
+                if((r < 255) || (g < 255) || (b < 255)){                   
+                    sum_x += i;
+                    sum_y += j;
+                    count++;
+                }
+            }            
+        }        
+
+        int x = sum_x/count;
+        int y = sum_y/count;
+
+        float scale_x = SM_WIDTH/COLS;
+        float scale_y = SM_HEIGHT/LINES;      
+        
+        mvaddch(y/scale_y, x/scale_x, '0');
+        refresh();        
+
+        /*Signal exiting from the critic section*/
+        sem_post(sem_id1);  
 
         // Get input in non-blocking mode
         int cmd = getch();
@@ -219,18 +144,7 @@ int main(int argc, char const *argv[])
                 reset_console_ui();
             }
         }
-
-        else {
-            //delete(center[0].x, center[0].y, bmp);
-            center[0] = find_center(bmp, ptr);
-            bmp_save(bmp, "out/SNOP.bmp");
-            cx = center[0].x/20;
-            cy = center[0].y/20;
-            mvaddch(cy, cx, '0');
-            //mvaddch(center[0].y, center[0].x, '0');
-            refresh();
-            sleep(10);
-        }
+        
     }
 
     endwin();
